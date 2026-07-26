@@ -3,6 +3,7 @@ package autofocus
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -65,19 +66,50 @@ func TestSelectPendingPrioritizesBlockedThenSequence(t *testing.T) {
 	}
 }
 
+func TestWorkerReleasesLockWhenQueueIsEmpty(t *testing.T) {
+	store := testStore(t)
+	path := filepath.Join(store.dir, "worker.lock")
+	lock, acquired, err := acquireFileLock(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !acquired {
+		t.Fatal("worker lock was not acquired")
+	}
+
+	worker := Worker{store: store}
+	if err := worker.run(context.Background(), lock); err != nil {
+		t.Fatal(err)
+	}
+
+	replacement, acquired, err := acquireFileLock(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !acquired {
+		t.Fatal("worker lock was not released")
+	}
+	if err := replacement.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProcessWaitsUntilFiveSecondsIdle(t *testing.T) {
 	now := time.Unix(100, 0)
-	worker, pending, client := testWorker(t, now, InputSample{
+	worker, _, client := testWorker(t, now, InputSample{
 		Idle:        4*time.Second + 999*time.Millisecond,
 		LastInputAt: now.Add(-4*time.Second - 999*time.Millisecond),
 	})
 
-	outcome, err := worker.process(context.Background(), pending)
+	outcome, wait, _, err := worker.processNext(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if outcome != processWaiting {
 		t.Fatalf("process() outcome = %v, want waiting", outcome)
+	}
+	if wait != time.Millisecond {
+		t.Fatalf("process() wait = %s, want 1ms", wait)
 	}
 	if len(client.focused) != 0 {
 		t.Fatalf("focused = %#v, want empty", client.focused)
@@ -97,7 +129,7 @@ func TestProcessFocusesAttentionPaneAfterFiveSecondsIdle(t *testing.T) {
 		LastInputAt: now.Add(-5 * time.Second),
 	})
 
-	outcome, err := worker.process(context.Background(), pending)
+	outcome, _, _, err := worker.processNext(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +154,7 @@ func TestProcessFocusesAttentionPaneAfterFiveSecondsIdle(t *testing.T) {
 
 func TestProcessRequiresNewInputAfterAutomaticFocus(t *testing.T) {
 	now := time.Unix(100, 0)
-	worker, pending, client := testWorker(t, now, InputSample{
+	worker, _, client := testWorker(t, now, InputSample{
 		Idle:        10 * time.Second,
 		LastInputAt: now.Add(-10 * time.Second),
 	})
@@ -133,12 +165,15 @@ func TestProcessRequiresNewInputAfterAutomaticFocus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	outcome, err := worker.process(context.Background(), pending)
+	outcome, wait, _, err := worker.processNext(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if outcome != processWaiting {
 		t.Fatalf("process() outcome = %v, want waiting", outcome)
+	}
+	if wait != 5*time.Second {
+		t.Fatalf("process() wait = %s, want 5s", wait)
 	}
 	if len(client.focused) != 0 {
 		t.Fatalf("focused = %#v, want empty", client.focused)
@@ -148,7 +183,7 @@ func TestProcessRequiresNewInputAfterAutomaticFocus(t *testing.T) {
 		Idle:        5 * time.Second,
 		LastInputAt: now.Add(-4 * time.Second),
 	}}
-	outcome, err = worker.process(context.Background(), pending)
+	outcome, _, _, err = worker.processNext(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,13 +213,13 @@ func TestProcessRemovesSettledOrFocusedPane(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			now := time.Unix(100, 0)
-			worker, pending, client := testWorker(t, now, InputSample{
+			worker, _, client := testWorker(t, now, InputSample{
 				Idle:        5 * time.Second,
 				LastInputAt: now.Add(-5 * time.Second),
 			})
 			client.agent = test.agent
 
-			outcome, err := worker.process(context.Background(), pending)
+			outcome, _, _, err := worker.processNext(context.Background(), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -200,13 +235,13 @@ func TestProcessRemovesSettledOrFocusedPane(t *testing.T) {
 
 func TestProcessKeepsPendingNotificationOnFailure(t *testing.T) {
 	now := time.Unix(100, 0)
-	worker, pending, client := testWorker(t, now, InputSample{
+	worker, _, client := testWorker(t, now, InputSample{
 		Idle:        5 * time.Second,
 		LastInputAt: now.Add(-5 * time.Second),
 	})
 	client.focusErr = errors.New("focus failed")
 
-	if _, err := worker.process(context.Background(), pending); err == nil {
+	if _, _, _, err := worker.processNext(context.Background(), nil); err == nil {
 		t.Fatal("process() error = nil, want error")
 	}
 	if len(readState(t, worker.store).Pending) != 1 {
@@ -234,7 +269,6 @@ func testWorker(
 		input:         fakeInputSource{sample: sample},
 		clock:         fakeClock{now: now},
 		idleThreshold: 5 * time.Second,
-		pollInterval:  time.Millisecond,
 	}, pending, client
 }
 

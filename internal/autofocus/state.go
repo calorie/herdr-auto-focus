@@ -134,19 +134,11 @@ func (store *Store) saveUnlocked(state State) (err error) {
 		}
 	}()
 
-	if err := temp.Chmod(0o600); err != nil {
-		temp.Close()
-		return fmt.Errorf("set state permissions: %w", err)
-	}
 	encoder := json.NewEncoder(temp)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(state); err != nil {
 		temp.Close()
 		return fmt.Errorf("encode state: %w", err)
-	}
-	if err := temp.Sync(); err != nil {
-		temp.Close()
-		return fmt.Errorf("sync state: %w", err)
 	}
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close state: %w", err)

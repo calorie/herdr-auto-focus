@@ -1,12 +1,12 @@
 id = "calorie.herdr-auto-focus"
 name = "Herdr Auto Focus"
-version = "0.1.1"
+version = "0.1.2"
 min_herdr_version = "0.7.0"
 description = "Focus agents that need attention after system input becomes idle."
 platforms = ["macos"]
 
 [[build]]
-command = ["go", "build", "-trimpath", "-o", "bin/herdr-auto-focus", "./cmd/herdr-auto-focus"]
+command = ["go", "build", "-trimpath", "-ldflags=-s -w", "-o", "bin/herdr-auto-focus", "./cmd/herdr-auto-focus"]
 
 [[events]]
 on = "pane.agent_status_changed"

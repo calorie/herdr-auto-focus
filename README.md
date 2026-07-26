@@ -80,7 +80,7 @@ herdr plugin uninstall calorie/herdr-auto-focus
 ```bash
 go test ./...
 go vet ./...
-go build -trimpath -o bin/herdr-auto-focus ./cmd/herdr-auto-focus
+go build -trimpath -ldflags="-s -w" -o bin/herdr-auto-focus ./cmd/herdr-auto-focus
 herdr plugin link .
 ```
 

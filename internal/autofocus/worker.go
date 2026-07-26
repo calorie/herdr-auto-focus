@@ -22,7 +22,6 @@ type Worker struct {
 	input         InputSource
 	clock         Clock
 	idleThreshold time.Duration
-	pollInterval  time.Duration
 }
 
 type processOutcome int
@@ -40,21 +39,17 @@ func (worker *Worker) run(ctx context.Context, workerLock *fileLock) (err error)
 	}()
 
 	for {
-		pending, released, err := worker.nextOrRelease(workerLock)
+		outcome, wait, released, err := worker.processNext(ctx, workerLock)
 		if err != nil {
 			return err
 		}
 		if released {
 			return nil
 		}
-		outcome, err := worker.process(ctx, pending)
-		if err != nil {
-			return err
-		}
 		if outcome != processWaiting {
 			continue
 		}
-		if err := waitForPoll(ctx, worker.pollInterval); err != nil {
+		if err := waitForPoll(ctx, wait); err != nil {
 			return err
 		}
 		if ctx.Err() != nil {
@@ -63,32 +58,18 @@ func (worker *Worker) run(ctx context.Context, workerLock *fileLock) (err error)
 	}
 }
 
-func (worker *Worker) nextOrRelease(
-	workerLock *fileLock,
-) (pending Pending, released bool, err error) {
-	err = worker.store.withLocked(func(state *State) (bool, error) {
-		selected, ok := selectPending(state.Pending)
-		if ok {
-			pending = selected
-			return false, nil
-		}
-		if err := workerLock.Unlock(); err != nil {
-			return false, err
-		}
-		released = true
-		return false, nil
-	})
-	return pending, released, err
-}
-
-func (worker *Worker) process(
+func (worker *Worker) processNext(
 	ctx context.Context,
-	expected Pending,
-) (outcome processOutcome, err error) {
+	workerLock *fileLock,
+) (outcome processOutcome, wait time.Duration, released bool, err error) {
 	outcome = processChanged
 	err = worker.store.withLocked(func(state *State) (bool, error) {
-		pending, ok := state.Pending[expected.PaneID]
-		if !ok || pending.Sequence != expected.Sequence {
+		pending, ok := selectPending(state.Pending)
+		if !ok {
+			if err := workerLock.Unlock(); err != nil {
+				return false, err
+			}
+			released = true
 			return false, nil
 		}
 
@@ -96,7 +77,12 @@ func (worker *Worker) process(
 		if err != nil {
 			return false, err
 		}
-		if !canFocus(sample, state.LastAutoFocusAtUnixNano, worker.idleThreshold) {
+		wait = focusDelay(
+			sample,
+			state.LastAutoFocusAtUnixNano,
+			worker.idleThreshold,
+		)
+		if wait > 0 {
 			outcome = processWaiting
 			return false, nil
 		}
@@ -130,21 +116,22 @@ func (worker *Worker) process(
 		outcome = processFocused
 		return true, nil
 	})
-	return outcome, err
+	return outcome, wait, released, err
 }
 
-func canFocus(
+func focusDelay(
 	sample InputSample,
 	lastAutoFocusAtUnixNano int64,
 	idleThreshold time.Duration,
-) bool {
+) time.Duration {
 	if sample.Idle < idleThreshold {
-		return false
+		return idleThreshold - sample.Idle
 	}
-	if lastAutoFocusAtUnixNano == 0 {
-		return true
+	if lastAutoFocusAtUnixNano != 0 &&
+		sample.LastInputAt.UnixNano() <= lastAutoFocusAtUnixNano {
+		return idleThreshold
 	}
-	return sample.LastInputAt.UnixNano() > lastAutoFocusAtUnixNano
+	return 0
 }
 
 func selectPending(pending map[string]Pending) (Pending, bool) {

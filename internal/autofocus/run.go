@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-const (
-	pluginEventName = "pane.agent_status_changed"
-	pollInterval    = time.Second
-)
+const pluginEventName = "pane.agent_status_changed"
 
 func Run(ctx context.Context) error {
 	eventName, err := requiredEnv("HERDR_PLUGIN_EVENT")
@@ -76,7 +73,6 @@ func Run(ctx context.Context) error {
 		input:         HIDIdleSource{now: time.Now},
 		clock:         realClock{},
 		idleThreshold: config.IdleDuration,
-		pollInterval:  pollInterval,
 	}
 	return worker.run(ctx, workerLock)
 }
