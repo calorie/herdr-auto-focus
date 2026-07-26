@@ -11,13 +11,13 @@ import (
 )
 
 type AgentInfo struct {
-	PaneID string `json:"pane_id"`
-	Status string `json:"agent_status"`
+	PaneID  string `json:"pane_id"`
+	Status  string `json:"agent_status"`
+	Focused bool   `json:"focused"`
 }
 
 type HerdrClient interface {
 	GetAgent(context.Context, string) (AgentInfo, error)
-	CurrentPane(context.Context) (string, error)
 	FocusAgent(context.Context, string) error
 }
 
@@ -50,21 +50,6 @@ func (client CLIClient) GetAgent(ctx context.Context, target string) (AgentInfo,
 		return AgentInfo{}, errors.New("agent get response did not include pane_id")
 	}
 	return result.Agent, nil
-}
-
-func (client CLIClient) CurrentPane(ctx context.Context) (string, error) {
-	var result struct {
-		Pane struct {
-			PaneID string `json:"pane_id"`
-		} `json:"pane"`
-	}
-	if err := client.call(ctx, &result, "pane", "current"); err != nil {
-		return "", err
-	}
-	if result.Pane.PaneID == "" {
-		return "", errors.New("pane current response did not include pane_id")
-	}
-	return result.Pane.PaneID, nil
 }
 
 func (client CLIClient) FocusAgent(ctx context.Context, target string) error {

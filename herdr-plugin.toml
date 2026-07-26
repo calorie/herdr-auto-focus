@@ -1,6 +1,6 @@
 id = "calorie.herdr-auto-focus"
 name = "Herdr Auto Focus"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.7.0"
 description = "Focus agents that need attention after system input becomes idle."
 platforms = ["macos"]

@@ -115,11 +115,7 @@ func (worker *Worker) process(
 			outcome = processRemoved
 			return true, nil
 		}
-		currentPaneID, err := worker.herdr.CurrentPane(ctx)
-		if err != nil {
-			return false, err
-		}
-		if currentPaneID == agent.PaneID {
+		if agent.Focused {
 			delete(state.Pending, pending.PaneID)
 			outcome = processRemoved
 			return true, nil

@@ -8,14 +8,11 @@ import (
 )
 
 type fakeHerdrClient struct {
-	agent        AgentInfo
-	agentErr     error
-	currentPane  string
-	currentErr   error
-	focusErr     error
-	focused      []string
-	getCalls     int
-	currentCalls int
+	agent    AgentInfo
+	agentErr error
+	focusErr error
+	focused  []string
+	getCalls int
 }
 
 func (client *fakeHerdrClient) GetAgent(
@@ -24,11 +21,6 @@ func (client *fakeHerdrClient) GetAgent(
 ) (AgentInfo, error) {
 	client.getCalls++
 	return client.agent, client.agentErr
-}
-
-func (client *fakeHerdrClient) CurrentPane(context.Context) (string, error) {
-	client.currentCalls++
-	return client.currentPane, client.currentErr
 }
 
 func (client *fakeHerdrClient) FocusAgent(
@@ -90,11 +82,10 @@ func TestProcessWaitsUntilFiveSecondsIdle(t *testing.T) {
 	if len(client.focused) != 0 {
 		t.Fatalf("focused = %#v, want empty", client.focused)
 	}
-	if client.getCalls != 0 || client.currentCalls != 0 {
+	if client.getCalls != 0 {
 		t.Fatalf(
-			"Herdr calls = (%d, %d), want no calls while input is active",
+			"GetAgent calls = %d, want no calls while input is active",
 			client.getCalls,
-			client.currentCalls,
 		)
 	}
 }
@@ -166,21 +157,22 @@ func TestProcessRequiresNewInputAfterAutomaticFocus(t *testing.T) {
 	}
 }
 
-func TestProcessRemovesSettledOrCurrentPane(t *testing.T) {
+func TestProcessRemovesSettledOrFocusedPane(t *testing.T) {
 	tests := []struct {
-		name        string
-		agent       AgentInfo
-		currentPane string
+		name  string
+		agent AgentInfo
 	}{
 		{
-			name:        "settled",
-			agent:       AgentInfo{PaneID: "w1:p2", Status: "idle"},
-			currentPane: "w1:p1",
+			name:  "settled",
+			agent: AgentInfo{PaneID: "w1:p2", Status: "idle"},
 		},
 		{
-			name:        "current",
-			agent:       AgentInfo{PaneID: "w1:p2", Status: "blocked"},
-			currentPane: "w1:p2",
+			name: "current",
+			agent: AgentInfo{
+				PaneID:  "w1:p2",
+				Status:  "blocked",
+				Focused: true,
+			},
 		},
 	}
 	for _, test := range tests {
@@ -191,7 +183,6 @@ func TestProcessRemovesSettledOrCurrentPane(t *testing.T) {
 				LastInputAt: now.Add(-5 * time.Second),
 			})
 			client.agent = test.agent
-			client.currentPane = test.currentPane
 
 			outcome, err := worker.process(context.Background(), pending)
 			if err != nil {
@@ -235,8 +226,7 @@ func testWorker(
 	}
 	pending := readState(t, store).Pending["w1:p2"]
 	client := &fakeHerdrClient{
-		agent:       AgentInfo{PaneID: "w1:p2", Status: "blocked"},
-		currentPane: "w1:p1",
+		agent: AgentInfo{PaneID: "w1:p2", Status: "blocked"},
 	}
 	return &Worker{
 		store:         store,
